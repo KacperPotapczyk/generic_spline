@@ -58,6 +58,9 @@ impl Spline {
         let intervals_index_start = self
             .calculate_intervals_index_start(number_of_intervals, &intervals_coefficients_number);
 
+        let polynomial_derivative_coefficients =
+            self.calculate_polynomial_derivative_coefficients(&intervals_degree);
+
         let mut x1_pow: Vec<f64> = (0..intervals_coefficients_number[0])
             .into_iter()
             .map(|p| self.knots[0].x.powi(p as i32))
@@ -73,7 +76,7 @@ impl Spline {
                 .map(|p| self.knots[i + 1].x.powi(p as i32))
                 .collect();
 
-            self.function_value_equation_coefficents(
+            self.function_value_equation_coefficients(
                 number_of_coefficients,
                 index_start,
                 &x0_pow,
@@ -83,7 +86,7 @@ impl Spline {
                 &mut rhs,
             );
 
-            self.function_value_equation_coefficents(
+            self.function_value_equation_coefficients(
                 number_of_coefficients,
                 index_start,
                 &x1_pow,
@@ -94,7 +97,7 @@ impl Spline {
             );
 
             if i < number_of_intervals - 1 {
-                self.continuity_equation_coefficents(
+                self.continuity_equation_coefficients(
                     self.knots[i + 1].continuity,
                     number_of_coefficients,
                     intervals_coefficients_number[i + 1],
@@ -105,6 +108,7 @@ impl Spline {
                     &mut equation_counter,
                     &mut matrix,
                     &mut rhs,
+                    &polynomial_derivative_coefficients,
                 );
             }
 
@@ -116,6 +120,7 @@ impl Spline {
                 &mut equation_counter,
                 &mut matrix,
                 &mut rhs,
+                &polynomial_derivative_coefficients,
             );
 
             self.derivatives_values_equation_coefficients(
@@ -126,15 +131,16 @@ impl Spline {
                 &mut equation_counter,
                 &mut matrix,
                 &mut rhs,
+                &polynomial_derivative_coefficients,
             );
         }
 
-        println!("intervals_degree: {:?}", intervals_degree);
-        println!("matrix: {}", matrix);
-        println!("rhs: {}", rhs);
+        // println!("intervals_degree: {:?}", intervals_degree);
+        // println!("matrix: {}", matrix);
+        // println!("rhs: {}", rhs);
 
         let solution = matrix.lu().solve(&rhs).unwrap();
-        println!("solution: {}", solution);
+        // println!("solution: {}", solution);
 
         for i in 0..number_of_intervals {
             let number_of_coefficients = intervals_coefficients_number[i];
@@ -195,7 +201,40 @@ impl Spline {
         intervals_index_start
     }
 
-    fn function_value_equation_coefficents(
+    fn calculate_polynomial_derivative_coefficients(
+        &mut self,
+        intervals_degree: &Vec<usize>,
+    ) -> DMatrix<f64> {
+        let max_interval_degree = *intervals_degree.iter().max().unwrap_or(&0);
+        let max_derivative = self.knots.iter().map(|k| k.continuity).max().unwrap_or(0);
+
+        let mut polynomial_derivative_coefficents =
+            DMatrix::<f64>::zeros(max_interval_degree + 1, max_derivative + 1);
+        for i in 0..=max_interval_degree {
+            for d in 0..=max_derivative {
+                polynomial_derivative_coefficents[(i, d)] =
+                    self.polynomial_derivative_coefficient(i, d);
+            }
+        }
+
+        polynomial_derivative_coefficents
+    }
+
+    fn polynomial_derivative_coefficient(
+        &self,
+        polynomial_order: usize,
+        derievative_order: usize,
+    ) -> f64 {
+        let mut multiplier = 1.0;
+        let mut coeff = polynomial_order as f64;
+        for _ in 0..derievative_order {
+            multiplier *= coeff;
+            coeff -= 1.0;
+        }
+        multiplier
+    }
+
+    fn function_value_equation_coefficients(
         &self,
         number_of_coefficients: usize,
         index_start: usize,
@@ -212,7 +251,7 @@ impl Spline {
         *equation_counter += 1;
     }
 
-    fn continuity_equation_coefficents(
+    fn continuity_equation_coefficients(
         &self,
         continiuity: usize,
         number_of_coefficients_0: usize,
@@ -224,6 +263,7 @@ impl Spline {
         equation_counter: &mut usize,
         matrix: &mut DMatrix<f64>,
         rhs: &mut DVector<f64>,
+        polynomial_derivative_coefficients: &DMatrix<f64>,
     ) {
         for order in 1..=continiuity {
             if derivatives_values.contains_key(&order) {
@@ -231,13 +271,23 @@ impl Spline {
             }
 
             for c in 0..number_of_coefficients_0 {
-                matrix[(*equation_counter, index_start_0 + c)] =
-                    self.derivative_equation_coefficent(c, order, x_pow);
+                matrix[(*equation_counter, index_start_0 + c)] = self
+                    .derivative_equation_coefficient(
+                        c,
+                        order,
+                        x_pow,
+                        polynomial_derivative_coefficients,
+                    );
             }
 
             for c in 0..number_of_coefficients_1 {
-                matrix[(*equation_counter, index_start_1 + c)] =
-                    -1.0 * self.derivative_equation_coefficent(c, order, x_pow);
+                matrix[(*equation_counter, index_start_1 + c)] = -1.0
+                    * self.derivative_equation_coefficient(
+                        c,
+                        order,
+                        x_pow,
+                        polynomial_derivative_coefficients,
+                    );
             }
 
             rhs[*equation_counter] = 0.0;
@@ -254,43 +304,36 @@ impl Spline {
         equation_counter: &mut usize,
         matrix: &mut DMatrix<f64>,
         rhs: &mut DVector<f64>,
+        polynomial_derivative_coefficients: &DMatrix<f64>,
     ) {
         for (order, value) in derivatives_values {
             for c in 0..number_of_coefficients {
-                matrix[(*equation_counter, index_start + c)] =
-                    self.derivative_equation_coefficent(c, *order, &x_pow);
+                matrix[(*equation_counter, index_start + c)] = self
+                    .derivative_equation_coefficient(
+                        c,
+                        *order,
+                        &x_pow,
+                        polynomial_derivative_coefficients,
+                    );
             }
             rhs[*equation_counter] = *value;
             *equation_counter += 1;
         }
     }
 
-    fn derivative_equation_coefficent(
+    fn derivative_equation_coefficient(
         &self,
         polynomial_order: usize,
         derievative_order: usize,
         x_pow: &Vec<f64>,
+        polynomial_derivative_coefficients: &DMatrix<f64>,
     ) -> f64 {
         if polynomial_order < derievative_order {
             return 0.0;
         } else {
             return x_pow[polynomial_order - derievative_order]
-                * self.polynomial_derivative_coeff(polynomial_order, derievative_order);
+                * polynomial_derivative_coefficients[(polynomial_order, derievative_order)];
         }
-    }
-
-    fn polynomial_derivative_coeff(
-        &self,
-        polynomial_order: usize,
-        derievative_order: usize,
-    ) -> f64 {
-        let mut multiplier = 1.0;
-        let mut coeff = polynomial_order as f64;
-        for _ in 0..derievative_order {
-            multiplier *= coeff;
-            coeff -= 1.0;
-        }
-        multiplier
     }
 
     fn create_polynomial_for_interval(
