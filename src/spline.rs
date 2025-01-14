@@ -273,8 +273,6 @@ impl Spline {
     ) -> f64 {
         if polynomial_order < derievative_order {
             return 0.0;
-        } else if polynomial_order == derievative_order {
-            return 1.0;
         } else {
             return x_pow[polynomial_order - derievative_order]
                 * self.polynomial_derivative_coeff(polynomial_order, derievative_order);
@@ -363,9 +361,239 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.13).unwrap(), 1.13_f64.powi(2), eps);
         assert_approx_eq!(
             spline.interpolate(1.8643128).unwrap(),
-            1.8643_f64.powi(2),
+            1.8643128_f64.powi(2),
             eps
         );
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), 4.0, eps);
+    }
+
+    #[test]
+    fn tree_point_c0_c0_c0() {
+        let eps = 1e-6;
+        let y0 = 4.0;
+        let y1 = 2.0;
+        let y2 = 6.0;
+
+        let knot1 = Knot::new(0.0, y0, 0, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.0, y1, 0, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.25).unwrap(), 3.5, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 3.0, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 4.0, eps);
+        assert_approx_eq!(spline.interpolate(1.75).unwrap(), 5.0, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c0_c1_c0() {
+        let eps = 1e-6;
+        let y0 = 5.0;
+        let y1 = 3.0;
+        let y2 = 4.0;
+
+        let knot1 = Knot::new(0.0, y0, 0, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.0, y1, 1, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.12, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 3.25, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 3.5, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 3.8, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c0_c1_fix_c0() {
+        let eps = 1e-6;
+        let y0 = 5.0;
+        let y1 = 3.0;
+        let y2 = 1.0;
+
+        let knot1 = Knot::new(0.0, y0, 0, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.0, y1, 1, HashMap::from([(1, 1.0)])).unwrap();
+        let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.12, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 3.25, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 2.75, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 1.88, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c0_c1_fix() {
+        let eps = 1e-6;
+        let y0 = 5.0;
+        let y1 = 2.0;
+        let y2 = 1.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, -5.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 0, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -3.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.08, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 3.0, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 2.0, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 1.52, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c0_c2_c0() {
+        let eps = 1e-6;
+        let y0 = 5.0;
+        let y1 = 4.0;
+        let y2 = 7.0;
+
+        let knot1 = Knot::new(0.0, y0, 0, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.0, y1, 2, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.48, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 4.0, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 5.0, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 6.08, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c2_c1_fix() {
+        let eps = 1e-6;
+        let y0 = 3.0;
+        let y1 = 1.0;
+        let y2 = 4.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, -3.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 2, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -2.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 2.344, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 1.375, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 3.0, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 4.008, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c1_c1_fix() {
+        let eps = 1e-6;
+        let y0 = -3.0;
+        let y1 = 6.0;
+        let y2 = 13.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, 10.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 1, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, 9.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), -0.944, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 2.125, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 9.0, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 11.28, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c1_fix_c1_fix() {
+        let eps = 1e-6;
+        let y0 = 4.0;
+        let y1 = 3.0;
+        let y2 = -7.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, 2.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 1, HashMap::from([(1, -2.0)])).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -21.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.216, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 4.0, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 0.375, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), -3.336, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c0_c2_fix2_c1_fix() {
+        let eps = 1e-6;
+        let y0 = -1.0;
+        let y1 = 3.0;
+        let y2 = -1.0;
+
+        let knot1 = Knot::new(0.0, y0, 0, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.0, y1, 2, HashMap::from([(2, -4.0)])).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -10.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 0.696, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 2.25, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 2.25, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 0.696, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn tree_point_c2_fix_c3_c1_fix() {
+        let eps = 1e-6;
+        let y0 = 2.0;
+        let y1 = 1.0;
+        let y2 = 4.0;
+
+        let knot1 = Knot::new(0.0, y0, 2, HashMap::from([(1, 3.0), (2, -8.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 3, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, 11.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), 2.4272, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 2.375, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 0.625, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 2.1328, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
     }
 }
