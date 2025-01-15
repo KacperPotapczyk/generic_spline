@@ -26,6 +26,7 @@ impl Spline {
         return spline;
     }
 
+    // TODO add extrapolate method
     pub fn interpolate(&self, x: f64) -> Result<f64, Box<dyn Error>> {
         if self.is_in_range(x) {
             let index = self.find_interval_index(x);
@@ -37,6 +38,7 @@ impl Spline {
     }
 
     fn sort_knots(&mut self) {
+        // TODO handle invalid knots with the same x value
         self.knots.sort();
         self.min_x = self.knots[0].x;
         self.max_x = self.knots[self.knots.len() - 1].x;
@@ -65,12 +67,23 @@ impl Spline {
             .into_iter()
             .map(|p| self.knots[0].x.powi(p as i32))
             .collect();
+        let mut x0_pow ;
+
+        // println!("intervals_degree: {:?}", intervals_degree);
 
         for i in 0..number_of_intervals {
             let index_start = intervals_index_start[i];
             let number_of_coefficients = intervals_coefficients_number[i];
 
-            let x0_pow: Vec<f64> = x1_pow.clone();
+            if x1_pow.len() >= number_of_coefficients {
+                x0_pow = x1_pow.clone();
+            } else {
+                x0_pow = (0..number_of_coefficients)
+                .into_iter()
+                .map(|p| self.knots[i].x.powi(p as i32))
+                .collect();
+            }
+            
             x1_pow = (0..number_of_coefficients)
                 .into_iter()
                 .map(|p| self.knots[i + 1].x.powi(p as i32))
@@ -135,10 +148,10 @@ impl Spline {
             );
         }
 
-        // println!("intervals_degree: {:?}", intervals_degree);
         // println!("matrix: {}", matrix);
         // println!("rhs: {}", rhs);
 
+        // TODO handle solver error
         let solution = matrix.lu().solve(&rhs).unwrap();
         // println!("solution: {}", solution);
 
@@ -357,6 +370,7 @@ impl Spline {
     }
 
     fn find_interval_index(&self, x: f64) -> usize {
+        // TODO add heuristic to check last index first
         let size = self.knots.len();
         for i in 1..size - 1 {
             if x < self.knots[i].x {
@@ -503,6 +517,29 @@ mod tests {
     }
 
     #[test]
+    fn tree_point_c0_c0_c2_fix() {
+        let eps = 1e-6;
+        let y0 = -1.0;
+        let y1 = 3.0;
+        let y2 = -1.0;
+
+        let knot1 = Knot::new(0.0, y0, 0, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.0, y1, 0, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 2, HashMap::from([(1, -10.0), (2, -16.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), -0.2, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), 1.0, eps);
+        assert_approx_eq!(spline.interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 2.25, eps);
+        assert_approx_eq!(spline.interpolate(1.8).unwrap(), 0.696, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
     fn tree_point_c0_c2_c0() {
         let eps = 1e-6;
         let y0 = 5.0;
@@ -638,5 +675,32 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.5).unwrap(), 0.625, eps);
         assert_approx_eq!(spline.interpolate(1.8).unwrap(), 2.1328, eps);
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn example() {
+
+        let x_min = 0.0;
+        let x_max = 6.0;
+
+        let knots = vec![
+            Knot::fix0(x_min, 1.0),
+            Knot::c0(1.0, -1.0),
+            Knot::c0(2.0, 0.0),
+            Knot::c0(3.0, -1.0),
+            Knot::c0(4.0, 3.0),
+            Knot::c0(5.0, 0.5),
+            Knot::fix0(x_max, 1.0)
+        ];
+
+        let spline = Spline::new(knots);
+
+        let number_of_points = 60;
+        let step = (x_max - x_min) /  number_of_points as f64;
+        for i in 0..=number_of_points {
+            let x = x_min + step*i as f64;
+            println!("{:.2};{:.2}", x, spline.interpolate(x).unwrap());
+        }
+        assert!(true);
     }
 }
