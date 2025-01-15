@@ -27,7 +27,6 @@ impl Spline {
         return Ok(spline);
     }
 
-    // TODO add extrapolate method
     pub fn interpolate(&self, x: f64) -> Result<f64, Box<dyn Error>> {
         if self.is_in_range(x) {
             let index = self.find_interval_index(x);
@@ -36,6 +35,11 @@ impl Spline {
         } else {
             return Err(Box::new(SplineError("x is out of range".to_string())));
         }
+    }
+
+    pub fn extrapolate(&self, x: f64) -> f64 {
+        let index = self.find_interval_index(x);
+        self.polynomials[index].evaluate(x)
     }
 
     fn sort_knots(&mut self) {
@@ -386,7 +390,6 @@ impl Spline {
     }
 
     fn find_interval_index(&self, x: f64) -> usize {
-        // TODO add heuristic to check last index first
         let size = self.knots.len();
         for i in 1..size - 1 {
             if x < self.knots[i].x {
@@ -438,6 +441,11 @@ mod tests {
             eps
         );
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), 4.0, eps);
+
+        assert_approx_eq!(spline.extrapolate(-1.0), (-1.0_f64).powi(2), eps);
+        assert_approx_eq!(spline.extrapolate(-0.2), (-0.2_f64).powi(2), eps);
+        assert_approx_eq!(spline.extrapolate(2.7), 2.7_f64.powi(2), eps);
+        assert_approx_eq!(spline.extrapolate(3.0), 3.0_f64.powi(2), eps);
     }
 
     #[test]
@@ -507,6 +515,11 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.5).unwrap(), 2.75, eps);
         assert_approx_eq!(spline.interpolate(1.8).unwrap(), 1.88, eps);
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+
+        assert_approx_eq!(spline.extrapolate(-1.0), 13.0, eps);
+        assert_approx_eq!(spline.extrapolate(-0.2), 6.12, eps);
+        assert_approx_eq!(spline.extrapolate(2.7), -3.97, eps);
+        assert_approx_eq!(spline.extrapolate(3.0), -7.0, eps);
     }
 
     #[test]
@@ -599,6 +612,11 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.5).unwrap(), 3.0, eps);
         assert_approx_eq!(spline.interpolate(1.8).unwrap(), 4.008, eps);
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+
+        assert_approx_eq!(spline.extrapolate(-1.0), 1.0, eps);
+        assert_approx_eq!(spline.extrapolate(-0.2), 3.496, eps);
+        assert_approx_eq!(spline.extrapolate(2.7), -4.848, eps);
+        assert_approx_eq!(spline.extrapolate(3.0), -15.0, eps);
     }
 
     #[test]
@@ -691,6 +709,11 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.5).unwrap(), 0.625, eps);
         assert_approx_eq!(spline.interpolate(1.8).unwrap(), 2.1328, eps);
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+
+        assert_approx_eq!(spline.extrapolate(-1.0), -1.0, eps);
+        assert_approx_eq!(spline.extrapolate(-0.2), 1.2592, eps);
+        assert_approx_eq!(spline.extrapolate(2.7), 14.4538, eps);
+        assert_approx_eq!(spline.extrapolate(3.0), 19.0, eps);
     }
 
     #[test]
@@ -716,13 +739,13 @@ mod tests {
         let x_max = 6.0;
 
         let knots = vec![
-            Knot::fix0(x_min, 1.0),
-            Knot::c0(1.0, -1.0),
-            Knot::c0(2.0, 0.0),
-            Knot::c0(3.0, -1.0),
-            Knot::c0(4.0, 3.0),
-            Knot::c0(5.0, 0.5),
-            Knot::fix0(x_max, 1.0)
+            Knot::fix1(x_min, 1.0, 0.0),
+            Knot::c2(1.0, -1.0),
+            Knot::c2(2.0, 0.0),
+            Knot::c2(3.0, -1.0),
+            Knot::c2(4.0, 3.0),
+            Knot::c2(5.0, 0.5),
+            Knot::fix1(x_max, 1.0, 0.0)
         ];
 
         let spline = Spline::new(knots).unwrap();
