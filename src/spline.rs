@@ -12,7 +12,7 @@ pub struct Spline {
 }
 
 impl Spline {
-    pub fn new(knots: Vec<Knot>) -> Self {
+    pub fn new(knots: Vec<Knot>) -> Result<Self, Box<dyn Error>> {
         let number_of_intervals = knots.len() - 1;
         let mut spline = Spline {
             knots,
@@ -22,8 +22,9 @@ impl Spline {
         };
 
         spline.sort_knots();
-        spline.calculate_polynomials();
-        return spline;
+        spline.check_knots_spacing()?;
+        spline.calculate_polynomials()?;
+        return Ok(spline);
     }
 
     // TODO add extrapolate method
@@ -38,13 +39,25 @@ impl Spline {
     }
 
     fn sort_knots(&mut self) {
-        // TODO handle invalid knots with the same x value
         self.knots.sort();
         self.min_x = self.knots[0].x;
         self.max_x = self.knots[self.knots.len() - 1].x;
     }
 
-    fn calculate_polynomials(&mut self) {
+    fn check_knots_spacing(&self) -> Result<(), Box<dyn Error>> {
+        let sorted_x_values: Vec<f64> = self.knots.iter()
+            .map(|k| k.x)
+            .collect();
+    
+        for i in 0..sorted_x_values.len()-1 {
+            if (sorted_x_values[i] - sorted_x_values[i+1]).abs() < 1e-60 {
+                return Err(Box::new(SplineError("Nodes have equal x values".to_string())));
+            }
+        }
+        Ok(())
+    }
+    
+    fn calculate_polynomials(&mut self) -> Result<(), Box<dyn Error>> {
         let number_of_intervals = self.knots.len() - 1;
 
         let intervals_degree = self.calculate_intervals_degree(number_of_intervals);
@@ -151,8 +164,10 @@ impl Spline {
         // println!("matrix: {}", matrix);
         // println!("rhs: {}", rhs);
 
-        // TODO handle solver error
-        let solution = matrix.lu().solve(&rhs).unwrap();
+        let solution = match matrix.lu().solve(&rhs) {
+            Some(solution) => solution,
+            None => return Err(Box::new(SplineError("Error while solving set of equations".to_string()))),
+        };
         // println!("solution: {}", solution);
 
         for i in 0..number_of_intervals {
@@ -164,6 +179,7 @@ impl Spline {
                 &solution,
             );
         }
+        Ok(())
     }
 
     fn calculate_intervals_degree(&mut self, number_of_intervals: usize) -> Vec<usize> {
@@ -409,7 +425,7 @@ mod tests {
         let knot3 = Knot::new(2.0, 2.0_f64.powi(2), 1, HashMap::from([(1, 4.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), 0.0, eps);
         assert_approx_eq!(spline.interpolate(0.13).unwrap(), 0.13_f64.powi(2), eps);
@@ -436,7 +452,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.25).unwrap(), 3.5, eps);
@@ -459,7 +475,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.12, eps);
@@ -482,7 +498,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.12, eps);
@@ -505,7 +521,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -3.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.08, eps);
@@ -528,7 +544,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 2, HashMap::from([(1, -10.0), (2, -16.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), -0.2, eps);
@@ -551,7 +567,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 0, HashMap::new()).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.48, eps);
@@ -574,7 +590,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -2.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 2.344, eps);
@@ -597,7 +613,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, 9.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), -0.944, eps);
@@ -620,7 +636,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -21.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 4.216, eps);
@@ -643,7 +659,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -10.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 0.696, eps);
@@ -666,7 +682,7 @@ mod tests {
         let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, 11.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 2.4272, eps);
@@ -675,6 +691,22 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.5).unwrap(), 0.625, eps);
         assert_approx_eq!(spline.interpolate(1.8).unwrap(), 2.1328, eps);
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
+    }
+
+    #[test]
+    fn test_equal_x_knot_values() {
+        let y0 = 2.0;
+        let y1 = 1.0;
+        let y2 = 4.0;
+
+        let knot1 = Knot::c0(0.0, y0);
+        let knot2 = Knot::c0(0.0, y1);
+        let knot3 = Knot::c0(1.0, y2);
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots);
+
+        assert!(spline.is_err())
     }
 
     #[test]
@@ -693,7 +725,7 @@ mod tests {
             Knot::fix0(x_max, 1.0)
         ];
 
-        let spline = Spline::new(knots);
+        let spline = Spline::new(knots).unwrap();
 
         let number_of_points = 60;
         let step = (x_max - x_min) /  number_of_points as f64;
