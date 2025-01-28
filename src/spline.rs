@@ -9,16 +9,23 @@ pub struct Spline {
     polynomials: Vec<Polynomial>,
     min_x: f64,
     max_x: f64,
+    is_knot_spacing_uniform: bool 
 }
 
 impl Spline {
     pub fn new(knots: Vec<Knot>) -> Result<Self, Box<dyn Error>> {
+
+        if knots.len() < 2 {
+            return Err(Box::new(SplineError("Spline must have at least 2 knots".to_string())));
+        }
+
         let number_of_intervals = knots.len() - 1;
         let mut spline = Spline {
             knots,
             polynomials: Vec::with_capacity(number_of_intervals),
             min_x: 0.0,
             max_x: 0.0,
+            is_knot_spacing_uniform: false,
         };
 
         spline.sort_knots();
@@ -38,8 +45,16 @@ impl Spline {
     }
 
     pub fn extrapolate(&self, x: f64) -> f64 {
-        let index = self.find_interval_index(x);
-        self.polynomials[index].evaluate(x)
+
+        let size = self.knots.len();
+        if x < self.knots[1].x {
+            self.polynomials[0].evaluate(x)
+        } else if x > self.knots[size-2].x {
+            self.polynomials[size-2].evaluate(x)
+        } else {
+            let index = self.find_interval_index(x);
+            self.polynomials[index].evaluate(x)
+        }
     }
 
     fn sort_knots(&mut self) {
@@ -48,16 +63,24 @@ impl Spline {
         self.max_x = self.knots[self.knots.len() - 1].x;
     }
 
-    fn check_knots_spacing(&self) -> Result<(), Box<dyn Error>> {
-        let sorted_x_values: Vec<f64> = self.knots.iter()
+    fn check_knots_spacing(&mut self) -> Result<(), Box<dyn Error>> {
+
+        let x_spacing_vec: Vec<f64> = self.knots.iter()
             .map(|k| k.x)
+            .collect::<Vec<f64>>()
+            .windows(2)
+            .map(|w| w[1] - w[0])
             .collect();
-    
-        for i in 0..sorted_x_values.len()-1 {
-            if (sorted_x_values[i] - sorted_x_values[i+1]).abs() < 1e-60 {
-                return Err(Box::new(SplineError("Nodes have equal x values".to_string())));
-            }
+
+        if x_spacing_vec.iter().any(|spacing| *spacing < 1e-16) {
+            return Err(Box::new(SplineError("Knots have equal x values".to_string())));
         }
+
+        self.is_knot_spacing_uniform = x_spacing_vec
+            .windows(2)
+            .map(|spacing| (spacing[1] - spacing[0]).abs())
+            .all(|difference| difference < 1e-16);
+    
         Ok(())
     }
     
@@ -390,13 +413,40 @@ impl Spline {
     }
 
     fn find_interval_index(&self, x: f64) -> usize {
+        if self.is_knot_spacing_uniform {
+            return self.find_interval_index_uniform(x);
+        } else {
+            return self.find_interval_index_bisect(x);
+        }
+    }
+
+    fn find_interval_index_bisect(&self, x:f64) -> usize {
         let size = self.knots.len();
-        for i in 1..size - 1 {
-            if x < self.knots[i].x {
-                return i - 1;
+        let mut min = 0;
+        let mut max = size - 1;
+        
+        while max - min > 1 {
+            let mid = (min + max) / 2;
+            if x < self.knots[mid].x {
+                max = mid;
+            } else {
+                min = mid;
             }
         }
-        return size - 2;
+        return min;
+    }
+
+    fn find_interval_index_uniform(&self, x:f64) -> usize {
+
+        let relative_x = (x - self.min_x) / (self.max_x - self.min_x);
+        if relative_x < 0.0 || relative_x > 1.0 {
+            panic!("x is out of range")
+        }
+        let index = (relative_x * (self.knots.len() - 1) as f64).floor() as usize;
+        if index == self.knots.len() - 1 {
+            return index - 1;
+        }
+        return index;
     }
 }
 
@@ -424,11 +474,13 @@ mod tests {
         let eps = 1e-6;
 
         let knot1 = Knot::new(0.0, 0.0_f64.powi(2), 1, HashMap::from([(1, 0.0)])).unwrap();
-        let knot2 = Knot::new(1.0, 1.0_f64.powi(2), 2, HashMap::new()).unwrap();
+        let knot2 = Knot::new(1.1, 1.1_f64.powi(2), 2, HashMap::new()).unwrap();
         let knot3 = Knot::new(2.0, 2.0_f64.powi(2), 1, HashMap::from([(1, 4.0)])).unwrap();
         let knots = vec![knot1, knot2, knot3];
 
         let spline = Spline::new(knots).unwrap();
+
+        assert!(!spline.is_knot_spacing_uniform);
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), 0.0, eps);
         assert_approx_eq!(spline.interpolate(0.13).unwrap(), 0.13_f64.powi(2), eps);
@@ -461,6 +513,8 @@ mod tests {
         let knots = vec![knot1, knot2, knot3];
 
         let spline = Spline::new(knots).unwrap();
+
+        assert!(spline.is_knot_spacing_uniform);
 
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.25).unwrap(), 3.5, eps);
@@ -592,6 +646,33 @@ mod tests {
     }
 
     #[test]
+    fn two_point_c1_fix_c1_fix() {
+        let eps = 1e-6;
+        let y0 = -4.0;
+        let y1 = 6.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, 3.0)])).unwrap();
+        let knot2 = Knot::new(2.0, y1, 1, HashMap::from([(1, 1.0)])).unwrap();
+        let knots = vec![knot1, knot2];
+
+        let spline = Spline::new(knots).unwrap();
+
+        assert!(spline.is_knot_spacing_uniform);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), -3.252, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), -1.6875, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 4.4375, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y1, eps);
+
+
+        assert_approx_eq!(spline.extrapolate(-1.0), -1.5, eps);
+        assert_approx_eq!(spline.extrapolate(-0.2), -4.428, eps);
+        assert_approx_eq!(spline.extrapolate(2.7), 3.7355, eps);
+        assert_approx_eq!(spline.extrapolate(3.0), 0.5, eps);
+    }
+
+    #[test]
     fn tree_point_c1_fix_c2_c1_fix() {
         let eps = 1e-6;
         let y0 = 3.0;
@@ -605,6 +686,8 @@ mod tests {
 
         let spline = Spline::new(knots).unwrap();
 
+        assert!(spline.is_knot_spacing_uniform);
+
         assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
         assert_approx_eq!(spline.interpolate(0.2).unwrap(), 2.344, eps);
         assert_approx_eq!(spline.interpolate(0.5).unwrap(), 1.375, eps);
@@ -617,6 +700,40 @@ mod tests {
         assert_approx_eq!(spline.extrapolate(-0.2), 3.496, eps);
         assert_approx_eq!(spline.extrapolate(2.7), -4.848, eps);
         assert_approx_eq!(spline.extrapolate(3.0), -15.0, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c2_c1_fix_non_uniform() {
+        let eps = 1e-6;
+        let y0 = -4.0;
+        let y1 = 6.0;
+        let y2 = -4.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, 3.0)])).unwrap();
+        let knot2 = Knot::new(2.0, y1, 2, HashMap::new()).unwrap();
+        let knot3 = Knot::new(3.0, y2, 1, HashMap::from([(1, -27.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots).unwrap();
+
+        assert!(!spline.is_knot_spacing_uniform);
+
+        assert_approx_eq!(spline.interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.interpolate(0.2).unwrap(), -3.252, eps);
+        assert_approx_eq!(spline.interpolate(0.5).unwrap(), -1.6875, eps);
+        assert_approx_eq!(spline.interpolate(1.5).unwrap(), 4.4375, eps);
+        assert_approx_eq!(spline.interpolate(2.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.interpolate(2.3).unwrap(), 5.688, eps);
+        assert_approx_eq!(spline.interpolate(2.8).unwrap(), 0.528, eps);
+        assert_approx_eq!(spline.interpolate(3.0).unwrap(), y2, eps);
+
+        assert_approx_eq!(spline.extrapolate(-1.0), -1.5, eps);
+        assert_approx_eq!(spline.extrapolate(-0.2), -4.428, eps);
+        assert_approx_eq!(spline.extrapolate(3.2), -10.368, eps);
+        assert_approx_eq!(spline.extrapolate(4.0), -60.0, eps);
+        assert_approx_eq!(spline.extrapolate(0.2), -3.252, eps);
+        assert_approx_eq!(spline.extrapolate(2.3), 5.688, eps);
+        assert_approx_eq!(spline.extrapolate(2.8), 0.528, eps);
     }
 
     #[test]
