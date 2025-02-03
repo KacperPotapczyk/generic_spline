@@ -9,7 +9,8 @@ pub struct Spline {
     polynomials: Vec<Polynomial>,
     min_x: f64,
     max_x: f64,
-    is_knot_spacing_uniform: bool 
+    is_knot_spacing_uniform: bool,
+    last_interval_cache: usize,
 }
 
 impl Spline {
@@ -26,6 +27,7 @@ impl Spline {
             min_x: 0.0,
             max_x: 0.0,
             is_knot_spacing_uniform: false,
+            last_interval_cache: 0,
         };
 
         spline.sort_knots();
@@ -37,8 +39,33 @@ impl Spline {
     pub fn interpolate(&self, x: f64) -> Result<f64, Box<dyn Error>> {
         if self.is_in_range(x) {
             let index = self.find_interval_index(x);
-            let result = self.polynomials[index].evaluate(x);
-            Ok(result)
+            Ok(self.polynomials[index].evaluate(x))
+        } else {
+            return Err(Box::new(SplineError("x is out of range".to_string())));
+        }
+    }
+
+    pub fn cached_interpolate(&mut self, x: f64) -> Result<f64, Box<dyn Error>> {
+        if self.is_in_range(x) {
+            let index = self.find_interval_index_with_cache(x);
+            Ok(self.polynomials[index].evaluate(x))
+        } else {
+            return Err(Box::new(SplineError("x is out of range".to_string())));
+        }
+    }
+
+    pub fn batch_interpolate(&self, x_vector: &Vec<f64>) -> Result<Vec<f64>, Box<dyn Error>> {
+
+        if x_vector.iter().all(|x| self.is_in_range(*x)) {
+
+            let mut results = Vec::with_capacity(x_vector.len());
+            let mut index = 0;
+
+            for x in x_vector {
+                index = self.find_interval_index_with_hint(index, *x);
+                results.push(self.polynomials[index].evaluate(*x));
+            }
+            return Ok(results);
         } else {
             return Err(Box::new(SplineError("x is out of range".to_string())));
         }
@@ -46,15 +73,41 @@ impl Spline {
 
     pub fn extrapolate(&self, x: f64) -> f64 {
 
-        let size = self.knots.len();
-        if x < self.knots[1].x {
-            self.polynomials[0].evaluate(x)
-        } else if x > self.knots[size-2].x {
-            self.polynomials[size-2].evaluate(x)
-        } else {
-            let index = self.find_interval_index(x);
-            self.polynomials[index].evaluate(x)
+        match self.evaluate_on_boundaries(x) {
+            Some(result) => return result,
+            None => {
+                let index = self.find_interval_index(x);
+                return self.polynomials[index].evaluate(x)
+            },
         }
+    }
+
+    pub fn cached_extrapolate(&mut self, x: f64) -> f64 {
+
+        match self.evaluate_on_boundaries(x) {
+            Some(result) => return result,
+            None => {
+                let index = self.find_interval_index_with_cache(x);
+                return self.polynomials[index].evaluate(x)
+            },
+        }
+    }
+
+    pub fn batch_extrapolate(&self, x_vector: &Vec<f64>) -> Vec<f64> {
+
+        let mut results = Vec::with_capacity(x_vector.len());
+        let mut index = 0;
+
+        for x in x_vector {
+            match self.evaluate_on_boundaries(*x) {
+                Some(result) => results.push(result),
+                None => {
+                    index = self.find_interval_index_with_hint(index, *x);
+                    results.push(self.polynomials[index].evaluate(*x));
+                },
+            }
+        }
+        return results;
     }
 
     fn sort_knots(&mut self) {
@@ -448,6 +501,47 @@ impl Spline {
         }
         return index;
     }
+
+    fn find_interval_index_with_cache(&mut self, x: f64) -> usize {
+        
+        if !self.is_in_interval_range(self.last_interval_cache, x) {
+
+            if self.last_interval_cache < self.knots.len()-1 && self.is_in_interval_range(self.last_interval_cache+1, x) {
+                self.last_interval_cache += 1;
+            } else {
+                self.last_interval_cache = self.find_interval_index(x);
+            }
+        }
+        self.last_interval_cache
+    }
+
+    fn find_interval_index_with_hint(&self, index_hint: usize, x: f64) -> usize {
+        
+        if !self.is_in_interval_range(index_hint, x) {
+
+            if index_hint < self.knots.len()-1 && self.is_in_interval_range(index_hint+1, x) {
+                return index_hint + 1;
+            } else {
+                return self.find_interval_index(x);
+            }
+        }
+        return index_hint;
+    }
+
+    fn is_in_interval_range(&self, interval_index: usize, x: f64) -> bool {
+        self.knots[interval_index].x <= x && x <= self.knots[interval_index+1].x
+    }
+
+    fn evaluate_on_boundaries(&self, x:f64) -> Option<f64> {
+        let size = self.knots.len();
+        if x < self.knots[1].x {
+            Some(self.polynomials[0].evaluate(x))
+        } else if x > self.knots[size-2].x {
+            Some(self.polynomials[size-2].evaluate(x))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -473,10 +567,13 @@ mod tests {
         // knots lay on f(x) = x^2 function
         let eps = 1e-6;
 
-        let knot1 = Knot::new(0.0, 0.0_f64.powi(2), 1, HashMap::from([(1, 0.0)])).unwrap();
-        let knot2 = Knot::new(1.1, 1.1_f64.powi(2), 2, HashMap::new()).unwrap();
-        let knot3 = Knot::new(2.0, 2.0_f64.powi(2), 1, HashMap::from([(1, 4.0)])).unwrap();
-        let knots = vec![knot1, knot2, knot3];
+        let knots = vec![
+            Knot::new(0.0, 0.0_f64.powi(2), 1, HashMap::from([(1, 0.0)])).unwrap(),
+            Knot::new(0.9, 0.9_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(1.1, 1.1_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(1.7, 1.7_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(2.0, 2.0_f64.powi(2), 1, HashMap::from([(1, 4.0)])).unwrap()
+        ];
 
         let spline = Spline::new(knots).unwrap();
 
@@ -494,10 +591,93 @@ mod tests {
         );
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), 4.0, eps);
 
+        assert!(spline.interpolate(3.0).is_err());
+
         assert_approx_eq!(spline.extrapolate(-1.0), (-1.0_f64).powi(2), eps);
         assert_approx_eq!(spline.extrapolate(-0.2), (-0.2_f64).powi(2), eps);
         assert_approx_eq!(spline.extrapolate(2.7), 2.7_f64.powi(2), eps);
         assert_approx_eq!(spline.extrapolate(3.0), 3.0_f64.powi(2), eps);
+        assert_approx_eq!(spline.extrapolate(1.5), 1.5_f64.powi(2), eps);
+    }
+
+    #[test]
+    fn over_x_squared_function_with_cache() {
+        // knots lay on f(x) = x^2 function
+        let eps = 1e-6;
+
+        let knots = vec![
+            Knot::new(0.0, 0.0_f64.powi(2), 1, HashMap::from([(1, 0.0)])).unwrap(),
+            Knot::new(0.9, 0.9_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(1.1, 1.1_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(1.7, 1.7_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(2.0, 2.0_f64.powi(2), 1, HashMap::from([(1, 4.0)])).unwrap()
+        ];
+
+        let mut spline = Spline::new(knots).unwrap();
+
+        assert!(!spline.is_knot_spacing_uniform);
+
+        assert_approx_eq!(spline.cached_interpolate(0.0).unwrap(), 0.0, eps);
+        assert_approx_eq!(spline.cached_interpolate(0.13).unwrap(), 0.13_f64.powi(2), eps);
+        assert_approx_eq!(spline.cached_interpolate(0.69).unwrap(), 0.69_f64.powi(2), eps);
+        assert_approx_eq!(spline.cached_interpolate(1.0).unwrap(), 1.0, eps);
+        assert_approx_eq!(spline.cached_interpolate(1.13).unwrap(), 1.13_f64.powi(2), eps);
+        assert_approx_eq!(
+            spline.cached_interpolate(1.8643128).unwrap(),
+            1.8643128_f64.powi(2),
+            eps
+        );
+        assert_approx_eq!(spline.cached_interpolate(2.0).unwrap(), 4.0, eps);
+
+        assert!(spline.cached_interpolate(3.0).is_err());
+
+        assert_approx_eq!(spline.cached_extrapolate(0.0001), (0.0001_f64).powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(0.0002), (0.0002_f64).powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(1.11), (1.11_f64).powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(-1.0), (-1.0_f64).powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(-0.2), (-0.2_f64).powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(2.7), 2.7_f64.powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(3.0), 3.0_f64.powi(2), eps);
+        assert_approx_eq!(spline.cached_extrapolate(1.5), 1.5_f64.powi(2), eps);
+    }
+
+
+
+    #[test]
+    fn over_x_squared_function_batch() {
+        // knots lay on f(x) = x^2 function
+        let eps = 1e-6;
+
+        let knots = vec![
+            Knot::new(0.0, 0.0_f64.powi(2), 1, HashMap::from([(1, 0.0)])).unwrap(),
+            Knot::new(0.9, 0.9_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(1.1, 1.1_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(1.7, 1.7_f64.powi(2), 2, HashMap::new()).unwrap(),
+            Knot::new(2.0, 2.0_f64.powi(2), 1, HashMap::from([(1, 4.0)])).unwrap()
+        ];
+
+        let spline = Spline::new(knots).unwrap();
+
+        assert!(!spline.is_knot_spacing_uniform);
+
+        let x_vector = vec![0.0, 0.13, 0.69, 1.0, 1.13, 1.8643128, 2.0];
+        let result = spline.batch_interpolate(&x_vector).unwrap();
+
+        assert_eq!(x_vector.len(), result.len());
+        for i in 0..x_vector.len() {
+            assert_approx_eq!(result[i], x_vector[i].powi(2), eps);
+        }
+
+        let x_vector = vec![0.0, 0.13, 0.69, 1.0, 3.0];
+        assert!(spline.batch_interpolate(&x_vector).is_err());
+
+        let x_vector = vec![0.0001, 0.0002, 1.11, -1.0, -0.2, 2.7, 3.0];
+        let result = spline.batch_extrapolate(&x_vector);
+
+        assert_eq!(x_vector.len(), result.len());
+        for i in 0..x_vector.len() {
+            assert_approx_eq!(result[i], x_vector[i].powi(2), eps);
+        }
     }
 
     #[test]
@@ -696,10 +876,79 @@ mod tests {
         assert_approx_eq!(spline.interpolate(1.8).unwrap(), 4.008, eps);
         assert_approx_eq!(spline.interpolate(2.0).unwrap(), y2, eps);
 
+        assert!(spline.interpolate(3.0).is_err());
+
         assert_approx_eq!(spline.extrapolate(-1.0), 1.0, eps);
         assert_approx_eq!(spline.extrapolate(-0.2), 3.496, eps);
         assert_approx_eq!(spline.extrapolate(2.7), -4.848, eps);
         assert_approx_eq!(spline.extrapolate(3.0), -15.0, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c2_c1_fix_with_cache() {
+        let eps = 1e-6;
+        let y0 = 3.0;
+        let y1 = 1.0;
+        let y2 = 4.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, -3.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 2, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -2.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let mut spline = Spline::new(knots).unwrap();
+
+        assert!(spline.is_knot_spacing_uniform);
+
+        assert_approx_eq!(spline.cached_interpolate(0.0).unwrap(), y0, eps);
+        assert_approx_eq!(spline.cached_interpolate(0.2).unwrap(), 2.344, eps);
+        assert_approx_eq!(spline.cached_interpolate(0.5).unwrap(), 1.375, eps);
+        assert_approx_eq!(spline.cached_interpolate(1.0).unwrap(), y1, eps);
+        assert_approx_eq!(spline.cached_interpolate(1.5).unwrap(), 3.0, eps);
+        assert_approx_eq!(spline.cached_interpolate(1.8).unwrap(), 4.008, eps);
+        assert_approx_eq!(spline.cached_interpolate(2.0).unwrap(), y2, eps);
+        
+        assert!(spline.cached_interpolate(3.0).is_err());
+
+        assert_approx_eq!(spline.cached_extrapolate(-1.0), 1.0, eps);
+        assert_approx_eq!(spline.cached_extrapolate(-0.2), 3.496, eps);
+        assert_approx_eq!(spline.cached_extrapolate(2.7), -4.848, eps);
+        assert_approx_eq!(spline.cached_extrapolate(3.0), -15.0, eps);
+    }
+
+    #[test]
+    fn tree_point_c1_fix_c2_c1_fix_batch() {
+        let eps = 1e-6;
+        let y0 = 3.0;
+        let y1 = 1.0;
+        let y2 = 4.0;
+
+        let knot1 = Knot::new(0.0, y0, 1, HashMap::from([(1, -3.0)])).unwrap();
+        let knot2 = Knot::new(1.0, y1, 2, HashMap::new()).unwrap();
+        let knot3 = Knot::new(2.0, y2, 1, HashMap::from([(1, -2.0)])).unwrap();
+        let knots = vec![knot1, knot2, knot3];
+
+        let spline = Spline::new(knots).unwrap();
+
+        assert!(spline.is_knot_spacing_uniform);
+
+        let x_vector = vec![0.0, 0.2, 0.5, 1.0, 1.5, 1.8, 2.0];
+        let expected_result = vec![y0, 2.344, 1.375, y1, 3.0, 4.008, y2];
+        let result = spline.batch_interpolate(&x_vector).unwrap();
+
+        assert_eq!(x_vector.len(), result.len());
+        for i in 0..x_vector.len() {
+            assert_approx_eq!(result[i], expected_result[i], eps);
+        }
+
+        let x_vector = vec![-1.0, -0.2, 2.7, 3.0];
+        let expected_result = vec![1.0, 3.496, -4.848, -15.0];
+        let result = spline.batch_extrapolate(&x_vector);
+
+        assert_eq!(x_vector.len(), result.len());
+        for i in 0..x_vector.len() {
+            assert_approx_eq!(result[i], expected_result[i], eps);
+        }
     }
 
     #[test]
@@ -834,6 +1083,16 @@ mod tests {
     }
 
     #[test]
+    fn test_one_knot_error() {
+        let knot1 = Knot::c0(0.0, 2.0);
+        let knots = vec![knot1];
+
+        let spline = Spline::new(knots);
+
+        assert!(spline.is_err())
+    }
+
+    #[test]
     fn test_equal_x_knot_values() {
         let y0 = 2.0;
         let y1 = 1.0;
@@ -874,5 +1133,60 @@ mod tests {
             println!("{:.2};{:.2}", x, spline.interpolate(x).unwrap());
         }
         assert!(true);
+    }
+
+    #[ignore]
+    #[test]
+    fn perfomance() {
+        use std::time::Instant;
+        use rand::Rng;
+
+        let x_min = 0.0;
+        let x_max = 6.0;
+        let mut rng = rand::thread_rng();
+
+        let mut knots = vec![
+            Knot::fix1(x_min, 1.0, 0.0),
+            Knot::fix1(x_max, 1.0, 0.0)
+        ];
+
+        let knots_number = 30;
+        let knot_step = (x_max - x_min) / knots_number as f64;
+
+        for i in 1..knots_number {
+            let x = x_min + knot_step*i as f64;
+            let y = rng.gen_range(0.0..10.0);
+            knots.push(Knot::c2(x, y));
+        }
+
+        let mut spline = Spline::new(knots).unwrap();
+
+        let number_of_points = 300;
+        let step = (x_max - x_min) / number_of_points as f64;
+
+        let mut x_vector = Vec::new();
+        for i in 10..=number_of_points {
+            x_vector.push(x_min + step*i as f64);
+        }
+
+        let now = Instant::now();
+        for x in x_vector.iter() {
+            assert!(spline.interpolate(*x).unwrap() >= -10.0);
+        }
+        let elapsed = now.elapsed();
+        println!("interpolate time: {:.2?}", elapsed);
+
+        let now = Instant::now();
+        for x in x_vector.iter() {
+            assert!(spline.cached_interpolate(*x).unwrap() >= -10.0);
+        }
+        let elapsed = now.elapsed();
+        println!("cached_interpolate time: {:.2?}", elapsed);
+
+        let now = Instant::now();
+        let result = spline.batch_interpolate(&x_vector).unwrap();
+        assert!(result.len() == x_vector.len());
+        let elapsed = now.elapsed();
+        println!("batch_interpolate time: {:.2?}", elapsed);
     }
 }

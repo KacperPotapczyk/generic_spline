@@ -223,4 +223,15 @@ mod tests {
         assert_eq!(second_derivative, *knot.derivatives_values.get(&2).unwrap());
         assert_eq!(third_derivative, *knot.derivatives_values.get(&3).unwrap());
     }
+
+    #[test]
+    fn test_invalid_derivative_for_given_degree() {
+        let x = 1.0;
+        let y = 2.5;
+        let continuity = 2;
+        let derivatives_values = HashMap::from([(3, 4.0)]);
+        let knot = Knot::new(x, y, continuity, derivatives_values);
+
+        assert!(knot.is_err())
+    }
 }
