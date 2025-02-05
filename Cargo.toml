@@ -6,6 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Library of generic implementation of spline which does not assume that spline is used in graphics context."
 readme = "README.md"
 keywords = ["interpolation", "spline"]
+repository = "https://github.com/KacperPotapczyk/generic_spline"
 
 [dependencies]
 nalgebra = "0.33.2"
