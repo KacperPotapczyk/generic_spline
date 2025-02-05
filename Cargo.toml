@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Library of generic implementation of spline which does not assume that spline is used in graphics context."
+readme = "README.md"
+keywords = ["interpolation", "spline"]
 
 [dependencies]
 nalgebra = "0.33.2"
