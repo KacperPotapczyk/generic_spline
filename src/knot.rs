@@ -1,13 +1,39 @@
 use std::{collections::HashMap, error::Error, fmt::Display};
 
+/// Knot represents point throught which spline function passes with additional data regarding 
+/// required continuity and derivatives values.
+/// - `x` - coordinate,
+/// - `y` - coordinate,
+/// - `continuity` - derivative order up to which derivatives must be continous,
+/// - `derivatives_values` - map with required derivatives values, entry defined by (derivative degree, derivative value).
 pub struct Knot {
-    pub x: f64,
-    pub y: f64,
-    pub continuity: usize,
-    pub derivatives_values: HashMap<usize, f64>
+    x: f64,
+    y: f64,
+    continuity: usize,
+    derivatives_values: HashMap<usize, f64>
 }
 
 impl Knot {
+    /// The most generic consturctor of [Knot]. User have to define all parameters of Knot. Paramter `derivatives_values`
+    /// does not have to specify all derivative values up to `continuity`.
+    /// # Example
+    /// ```
+    /// use std::collections::HashMap;
+    /// use generic_spline::Knot;
+    /// 
+    /// let knot = Knot::new(1.0, 2.0, 4, HashMap::from([(1, 0.0), (3, -5.0)]));
+    /// assert!(knot.is_ok());
+    /// ```
+    /// # Errors
+    /// Error is returned when `continuity` is lower than maximum derivative order of `derivatives_values`.
+    /// ```
+    /// use std::collections::HashMap;
+    /// use generic_spline::Knot;
+    /// 
+    /// // continuity is 2 while max order of derivatives_values is 3.
+    /// let knot = Knot::new(1.0, 2.0, 2, HashMap::from([(1, 0.0), (3, -5.0)]));
+    /// assert!(knot.is_err());
+    /// ```
     pub fn new(x: f64, y: f64, continuity: usize, derivatives_values: HashMap<usize, f64>) -> Result<Self, Box<dyn Error>> {
 
         let max_derivative_degree = derivatives_values.iter()
@@ -23,34 +49,68 @@ impl Knot {
         Ok(Knot { x, y, continuity, derivatives_values })
     }
 
+    /// Simplified method to create [Knot] with continuity of 0 (only function value is continous).
     pub fn c0(x: f64, y: f64) -> Self {
         Knot { x, y, continuity: 0, derivatives_values: HashMap::new() }
     }
 
+    /// Simplified method to create [Knot] with continuity of 1 (function value and first derivative is continous).
     pub fn c1(x: f64, y: f64) -> Self {
         Knot { x, y, continuity: 1, derivatives_values: HashMap::new() }
     }
 
+    /// Simplified method to create [Knot] with continuity of 2 (function value, first and second derivative is continous).
+    /// # Example
+    /// ```
+    /// use std::collections::HashMap;
+    /// use generic_spline::Knot;
+    /// 
+    /// let knot = Knot::new(1.0, 2.0, 2, HashMap::new()).unwrap();
+    /// let c2 = Knot::c2(1.0, 2.0);
+    /// 
+    /// assert_eq!(knot.get_x(), c2.get_x());
+    /// assert_eq!(knot.get_y(), c2.get_y());
+    /// assert_eq!(knot.get_continuity(), c2.get_continuity());
+    /// assert_eq!(knot.get_derivatives_values(), c2.get_derivatives_values());
+    /// ```
     pub fn c2(x: f64, y: f64) -> Self {
         Knot { x, y, continuity: 2, derivatives_values: HashMap::new() }
     }
 
+    /// Simplified method to create [Knot] with continuity of n (function value and derivatives up to degree n is continous).
     pub fn cn(x: f64, y:f64, continuity: usize) -> Self {
         Knot { x, y, continuity, derivatives_values: HashMap::new() }
     }
 
+    /// Simplified method to create [Knot] with continuity degree of 0. Result is the same as [Knot::c0].
     pub fn fix0(x: f64, y: f64) -> Self {
         Knot { x, y, continuity: 0, derivatives_values: HashMap::new() }
     }
 
+    /// Simplified method to create [Knot] with continuity of 1 and given first order derivative value.
+    /// # Example
+    /// ```
+    /// use std::collections::HashMap;
+    /// use generic_spline::Knot;
+    /// 
+    /// let knot = Knot::new(1.0, 2.0, 1, HashMap::from([(1, 0.0)])).unwrap();
+    /// let fix1 = Knot::fix1(1.0, 2.0, 0.0);
+    /// 
+    /// assert_eq!(knot.get_x(), fix1.get_x());
+    /// assert_eq!(knot.get_y(), fix1.get_y());
+    /// assert_eq!(knot.get_continuity(), fix1.get_continuity());
+    /// assert_eq!(knot.get_derivatives_values().get(&1), fix1.get_derivatives_values().get(&1));
+    /// ```
     pub fn fix1(x: f64, y: f64, first_derivative: f64) -> Self {
         Knot { x, y, continuity: 1, derivatives_values: HashMap::from([(1, first_derivative)]) }
     }
 
+    /// Simplified method to create [Knot] with continuity of 2 and given first and second order derivatives values.
     pub fn fix2(x: f64, y: f64, first_derivative: f64, second_derivative: f64) -> Self {
         Knot { x, y, continuity: 2, derivatives_values: HashMap::from([(1, first_derivative), (2, second_derivative)]) }
     }
 
+    /// Simplified method to create [Knot] with given dervative values and continuity equal to maximum derivative order.
     pub fn fixn(x: f64, y: f64, derivatives_values: HashMap<usize, f64>) -> Self {
         let max_derivative_degree = derivatives_values.iter()
                 .map(|kv| *kv.0)
@@ -59,6 +119,21 @@ impl Knot {
         Knot { x, y, continuity: max_derivative_degree, derivatives_values }
     }
 
+    pub fn get_x(&self) -> f64 {
+        self.x
+    }
+
+    pub fn get_y(&self) -> f64 {
+        self.y
+    }
+
+    pub fn get_continuity(&self) -> usize {
+        self.continuity
+    }
+
+    pub fn get_derivatives_values(&self) -> &HashMap<usize, f64> {
+        &self.derivatives_values
+    }
 }
 
 impl Ord for Knot {

@@ -4,6 +4,9 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::{knot::Knot, polynomial::Polynomial};
 
+/// Spline function that passes through knots ([Knot]) with continuity and dervatives constraints.
+/// Each knot can have different constraints on continuity and derivatives values, thus each spline interval (segment)
+/// can be a polynomial of different order.
 pub struct Spline {
     knots: Vec<Knot>,
     polynomials: Vec<Polynomial>,
@@ -14,6 +17,31 @@ pub struct Spline {
 }
 
 impl Spline {
+    /// Constructs new spline. Requires input vector of knots, that does not have to be in ascending order by knot x coordinate.
+    /// # Example
+    /// ```
+    /// use generic_spline::{Knot, Spline};
+    /// use assert_approx_eq::assert_approx_eq;
+    /// use std::collections::HashMap;
+    /// 
+    /// let eps = 1e-6;
+    /// let knot1 = Knot::fix1(0.0, 3.0, -3.0);
+    /// let knot2 = Knot::c2(1.0, 1.0);
+    /// let knot3 = Knot::fix1(2.0, 4.0, -2.0);
+    /// 
+    /// // knots does not have to be in ascending order by x
+    /// let knots = vec![knot3, knot1, knot2];
+    /// 
+    /// let spline = Spline::new(knots).unwrap();
+    /// 
+    /// assert_approx_eq!(spline.interpolate(0.2).unwrap(), 2.344, eps);
+    /// assert_approx_eq!(spline.interpolate(1.0).unwrap(), 1.0, eps);
+    /// assert_approx_eq!(spline.interpolate(1.8).unwrap(), 4.008, eps);
+    /// ```
+    /// # Errors
+    /// - Spline must be created with at least 2 knots.
+    /// - x values of Knots must be different.
+    /// - Solving set of linear equations may result in computational errors.
     pub fn new(knots: Vec<Knot>) -> Result<Self, Box<dyn Error>> {
 
         if knots.len() < 2 {
@@ -36,6 +64,9 @@ impl Spline {
         return Ok(spline);
     }
 
+    /// Basic method to get spline function value for given `x` inside spline range.
+    /// # Errors
+    /// `x` must be within bounds defined by minimal and maximal x value of knots.
     pub fn interpolate(&self, x: f64) -> Result<f64, Box<dyn Error>> {
         if self.is_in_range(x) {
             let index = self.find_interval_index(x);
@@ -45,6 +76,14 @@ impl Spline {
         }
     }
 
+    /// Returns spline function value for given `x` inside spline range.
+    /// Method utilize cache to store last used spline interval. This cached interval is checked first if `x` value in inside this interval.
+    /// If `x` is outside cached interval, heuristic is used which check if `x` is inside next interval.
+    /// When both checks fail then method fall back to basic search of interval.
+    /// Performance is better than [Spline::interpolate] when subsequent `x` values are close to each other
+    /// and even better when presented in ascending order.
+    /// # Errors
+    /// `x` must be within bounds defined by minimal and maximal x value of knots.
     pub fn cached_interpolate(&mut self, x: f64) -> Result<f64, Box<dyn Error>> {
         if self.is_in_range(x) {
             let index = self.find_interval_index_with_cache(x);
@@ -54,6 +93,12 @@ impl Spline {
         }
     }
 
+    /// Method that takes vector of `x` values that are inside of spline range and returns vector of spline function values.
+    /// Method does not assume that `x` values are in ascending order,
+    /// but ascending order improves performance as method cache for last spline interval is used.
+    /// Performace is comparable with [Spline::cached_interpolate].
+    /// # Errors
+    /// All `x` values in input vector must be within bounds defined by minimal and maximal x value of knots.
     pub fn batch_interpolate(&self, x_vector: &Vec<f64>) -> Result<Vec<f64>, Box<dyn Error>> {
 
         if x_vector.iter().all(|x| self.is_in_range(*x)) {
@@ -71,6 +116,8 @@ impl Spline {
         }
     }
 
+    /// Basic method to get spline function value for given `x`.
+    /// `x` value can be outside bounds defined by minimal and maximal x value of knots.
     pub fn extrapolate(&self, x: f64) -> f64 {
 
         match self.evaluate_on_boundaries(x) {
@@ -82,6 +129,12 @@ impl Spline {
         }
     }
 
+    /// Returns spline function value for given `x`.
+    /// Method utilize cache to store last used spline interval. This cached interval is checked first if `x` value in inside this interval.
+    /// If `x` is outside cached interval, heuristic is used which check if `x` is inside next interval.
+    /// When both checks fail then method fall back to basic search of interval.
+    /// Performance is better than [Spline::extrapolate] when subsequent `x` values are close to each other
+    /// and even better when presented in ascending order.
     pub fn cached_extrapolate(&mut self, x: f64) -> f64 {
 
         match self.evaluate_on_boundaries(x) {
@@ -93,6 +146,10 @@ impl Spline {
         }
     }
 
+    /// Method that takes vector of `x` values and returns vector of spline function values.
+    /// Method does not assume that `x` values are in ascending order,
+    /// but ascending order improves performance as method cache for last spline interval is used.
+    /// Performace is comparable with [Spline::cached_extrapolate].
     pub fn batch_extrapolate(&self, x_vector: &Vec<f64>) -> Vec<f64> {
 
         let mut results = Vec::with_capacity(x_vector.len());
@@ -112,14 +169,14 @@ impl Spline {
 
     fn sort_knots(&mut self) {
         self.knots.sort();
-        self.min_x = self.knots[0].x;
-        self.max_x = self.knots[self.knots.len() - 1].x;
+        self.min_x = self.knots[0].get_x();
+        self.max_x = self.knots[self.knots.len() - 1].get_x();
     }
 
     fn check_knots_spacing(&mut self) -> Result<(), Box<dyn Error>> {
 
         let x_spacing_vec: Vec<f64> = self.knots.iter()
-            .map(|k| k.x)
+            .map(|k| k.get_x())
             .collect::<Vec<f64>>()
             .windows(2)
             .map(|w| w[1] - w[0])
@@ -158,7 +215,7 @@ impl Spline {
 
         let mut x1_pow: Vec<f64> = (0..intervals_coefficients_number[0])
             .into_iter()
-            .map(|p| self.knots[0].x.powi(p as i32))
+            .map(|p| self.knots[0].get_x().powi(p as i32))
             .collect();
         let mut x0_pow ;
 
@@ -173,20 +230,20 @@ impl Spline {
             } else {
                 x0_pow = (0..number_of_coefficients)
                 .into_iter()
-                .map(|p| self.knots[i].x.powi(p as i32))
+                .map(|p| self.knots[i].get_x().powi(p as i32))
                 .collect();
             }
             
             x1_pow = (0..number_of_coefficients)
                 .into_iter()
-                .map(|p| self.knots[i + 1].x.powi(p as i32))
+                .map(|p| self.knots[i + 1].get_x().powi(p as i32))
                 .collect();
 
             self.function_value_equation_coefficients(
                 number_of_coefficients,
                 index_start,
                 &x0_pow,
-                self.knots[i].y,
+                self.knots[i].get_y(),
                 &mut equation_counter,
                 &mut matrix,
                 &mut rhs,
@@ -196,7 +253,7 @@ impl Spline {
                 number_of_coefficients,
                 index_start,
                 &x1_pow,
-                self.knots[i + 1].y,
+                self.knots[i + 1].get_y(),
                 &mut equation_counter,
                 &mut matrix,
                 &mut rhs,
@@ -204,13 +261,13 @@ impl Spline {
 
             if i < number_of_intervals - 1 {
                 self.continuity_equation_coefficients(
-                    self.knots[i + 1].continuity,
+                    self.knots[i + 1].get_continuity(),
                     number_of_coefficients,
                     intervals_coefficients_number[i + 1],
                     index_start,
                     intervals_index_start[i + 1],
                     &x1_pow,
-                    &self.knots[i + 1].derivatives_values,
+                    &self.knots[i + 1].get_derivatives_values(),
                     &mut equation_counter,
                     &mut matrix,
                     &mut rhs,
@@ -222,7 +279,7 @@ impl Spline {
                 number_of_coefficients,
                 index_start,
                 &x0_pow,
-                &self.knots[i].derivatives_values,
+                &self.knots[i].get_derivatives_values(),
                 &mut equation_counter,
                 &mut matrix,
                 &mut rhs,
@@ -233,7 +290,7 @@ impl Spline {
                 number_of_coefficients,
                 index_start,
                 &x1_pow,
-                &self.knots[i + 1].derivatives_values,
+                &self.knots[i + 1].get_derivatives_values(),
                 &mut equation_counter,
                 &mut matrix,
                 &mut rhs,
@@ -267,8 +324,8 @@ impl Spline {
         for i in 0..number_of_intervals {
             let mut degree: usize = 1;
 
-            degree += self.knots[i].derivatives_values.len();
-            degree += self.knots[i + 1].derivatives_values.len();
+            degree += self.knots[i].get_derivatives_values().len();
+            degree += self.knots[i + 1].get_derivatives_values().len();
 
             intervals_degree.push(degree);
         }
@@ -276,7 +333,7 @@ impl Spline {
         // correct degree using continuity without fixed derivative
         for i in 0..number_of_intervals - 1 {
             let continuity_minus_fixed_values =
-                self.knots[i + 1].continuity - self.knots[i + 1].derivatives_values.len();
+                self.knots[i + 1].get_continuity() - self.knots[i + 1].get_derivatives_values().len();
             let degree_from_continuity = continuity_minus_fixed_values / 2;
 
             if continuity_minus_fixed_values % 2 == 0 {
@@ -315,7 +372,7 @@ impl Spline {
         intervals_degree: &Vec<usize>,
     ) -> DMatrix<f64> {
         let max_interval_degree = *intervals_degree.iter().max().unwrap_or(&0);
-        let max_derivative = self.knots.iter().map(|k| k.continuity).max().unwrap_or(0);
+        let max_derivative = self.knots.iter().map(|k| k.get_continuity()).max().unwrap_or(0);
 
         let mut polynomial_derivative_coefficents =
             DMatrix::<f64>::zeros(max_interval_degree + 1, max_derivative + 1);
@@ -480,7 +537,7 @@ impl Spline {
         
         while max - min > 1 {
             let mid = (min + max) / 2;
-            if x < self.knots[mid].x {
+            if x < self.knots[mid].get_x() {
                 max = mid;
             } else {
                 min = mid;
@@ -529,14 +586,14 @@ impl Spline {
     }
 
     fn is_in_interval_range(&self, interval_index: usize, x: f64) -> bool {
-        self.knots[interval_index].x <= x && x <= self.knots[interval_index+1].x
+        self.knots[interval_index].get_x() <= x && x <= self.knots[interval_index+1].get_x()
     }
 
     fn evaluate_on_boundaries(&self, x:f64) -> Option<f64> {
         let size = self.knots.len();
-        if x < self.knots[1].x {
+        if x < self.knots[1].get_x() {
             Some(self.polynomials[0].evaluate(x))
-        } else if x > self.knots[size-2].x {
+        } else if x > self.knots[size-2].get_x() {
             Some(self.polynomials[size-2].evaluate(x))
         } else {
             None
@@ -1108,33 +1165,6 @@ mod tests {
         assert!(spline.is_err())
     }
 
-    #[test]
-    fn example() {
-
-        let x_min = 0.0;
-        let x_max = 6.0;
-
-        let knots = vec![
-            Knot::fix1(x_min, 1.0, 0.0),
-            Knot::c2(1.0, -1.0),
-            Knot::c2(2.0, 0.0),
-            Knot::c2(3.0, -1.0),
-            Knot::c2(4.0, 3.0),
-            Knot::c2(5.0, 0.5),
-            Knot::fix1(x_max, 1.0, 0.0)
-        ];
-
-        let spline = Spline::new(knots).unwrap();
-
-        let number_of_points = 60;
-        let step = (x_max - x_min) /  number_of_points as f64;
-        for i in 0..=number_of_points {
-            let x = x_min + step*i as f64;
-            println!("{:.2};{:.2}", x, spline.interpolate(x).unwrap());
-        }
-        assert!(true);
-    }
-
     #[ignore]
     #[test]
     fn perfomance() {
@@ -1165,7 +1195,7 @@ mod tests {
         let step = (x_max - x_min) / number_of_points as f64;
 
         let mut x_vector = Vec::new();
-        for i in 10..=number_of_points {
+        for i in 0..=number_of_points {
             x_vector.push(x_min + step*i as f64);
         }
 

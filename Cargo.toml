@@ -2,8 +2,12 @@
 name = "generic_spline"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Library of generic implementation of spline which does not assume that spline is used in graphics context."
 
 [dependencies]
-assert_approx_eq = "1.1.0"
 nalgebra = "0.33.2"
+
+[dev-dependencies]
+assert_approx_eq = "1.1.0"
 rand = "0.8.5"
